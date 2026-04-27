@@ -5,6 +5,7 @@ import time
 import queue
 import readchar
 
+debug = True
 SERVER_IP = "127.0.0.1"
 SERVER_PORT = 9000
 USERNAME = ""
@@ -13,6 +14,9 @@ MAX_MESSAGE_LENGTH = 1 << 20
 leave = False
 PRINT_MESSAGE = queue.Queue()
 SEND_MESSAGE = queue.Queue()
+MESSAGE_ESCAPE = "*"
+CODE_ESCAPE = "_"
+ACK_INTERVAL = 5  # send ack per 5 seconds
 
 END_ESCAPE = "\t"  # end sign of a message
 
@@ -91,21 +95,27 @@ class ChatUI:
                 leave = True
                 SEND_MESSAGE.put("__EXIT__")  # tell server I'm leaving
                 import os
+
                 os._exit(0)
-            if ch == '\x03':   # Ctrl+C
+            if ch == "\x03":  # Ctrl+C
                 leave = True
                 SEND_MESSAGE.put("__EXIT__")
                 print("\nExiting...")
 
             with self._lock:
-                if ch == readchar.key.ENTER:
+                if ch == "\x03":
+                    leave = True
+                    SEND_MESSAGE.put("__EXIT__")  # tell server I'm leaving
+                    break
+
+                elif ch == readchar.key.ENTER:
                     msg = "".join(self._buffer)
                     self._buffer.clear()
 
                     self._clear_line()
 
                     if msg.strip():
-                        SEND_MESSAGE.put(msg)
+                        SEND_MESSAGE.put(MESSAGE_ESCAPE + msg)
 
                     self._render_prompt()
 
@@ -120,6 +130,7 @@ class ChatUI:
                     self._buffer.append(ch)
                     sys.stdout.write(ch)
                     sys.stdout.flush()
+
         print("READCHAR break")
 
     def _clear_line(self):
@@ -131,14 +142,9 @@ class ChatUI:
         sys.stdout.flush()
 
 
-def importantPrint(x):
-    print("\n" + len(x) * "*")
-    print(x)
-    print(len(x) * "*" + "\n")
-
-
 def listen(sock):
     global leave
+    global debug
     while True:
         try:
             data = sock.recv(MAX_MESSAGE_LENGTH)
@@ -146,11 +152,31 @@ def listen(sock):
                 break
 
             msg = data.decode()
+            escape = msg[0:1]  # extract the first character
 
-            # split by end signal
-            for m in msg.split(END_ESCAPE):
-                if m.strip():
-                    PRINT_MESSAGE.put(m)
+            if debug:
+                PRINT_MESSAGE.put("\033[48;5;136mDEBUG\033[0m " + msg)
+
+            if escape == CODE_ESCAPE:
+                if msg == "__KICK__":  # which means the server has kick client off
+                    leave = True
+                    print(
+                        "You are offline now, please press \033[48;5;213mCtrl+C\033[0m to quit the code"
+                    )
+                    break
+
+            elif escape == MESSAGE_ESCAPE:
+                msg = msg[1:]
+                # split by end signal
+                for m in msg.split(END_ESCAPE):
+                    if m.strip():
+                        PRINT_MESSAGE.put(m)
+            else:
+                if debug:
+                    PRINT_MESSAGE.put(
+                        "\033[48;5;136mDEBUG\033[0m \033[48;5;196mMessage Corrupted\033[0m Received: "
+                        + msg
+                    )
 
         except:
             break
@@ -167,6 +193,15 @@ def send(sock):
             sock.send((msg + END_ESCAPE).encode())
         except:
             break
+
+
+def onlineACK(sock):
+    while True:
+        try:
+            sock.send(("__ACK__").encode())
+        except:
+            break
+        time.sleep(ACK_INTERVAL)
 
 
 def write(ui):
@@ -239,7 +274,7 @@ def main():
         )
     except KeyboardInterrupt:
         print()
-        print("\033[48;5;213mCtrl+C\033[0m captured! Quit the code。")
+        print("\033[48;5;213mCtrl+C\033[0m captured! Quit the chatroom.")
         exit(0)
 
     # username
@@ -248,11 +283,13 @@ def main():
 
     threading.Thread(target=listen, args=(s,), daemon=True).start()
     threading.Thread(target=send, args=(s,), daemon=True).start()
+    threading.Thread(target=onlineACK, args=(s,), daemon=True).start()
 
     ui = ChatUI()
     threading.Thread(target=write, args=(ui,), daemon=True).start()
 
     ui.start()  # main thraed
+    print("\033[48;5;213mCtrl+C\033[0m captured! Quit the chatroom.")
 
     s.close()
     leave = True
