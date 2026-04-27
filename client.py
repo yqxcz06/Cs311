@@ -131,8 +131,8 @@ class ChatUI:
 
                 elif ch == readchar.key.BACKSPACE:
                     if self._buffer:
-                        self._buffer.pop()
                         self._clear_line()
+                        self._buffer.pop()
                         self._render_prompt()
 
                 # normal characters
@@ -150,13 +150,13 @@ class ChatUI:
 
         sys.stdout.write("\r\033[K")  # 清除该行
 
-        for i in range(-1 + (clear_len // col) + 1 if ((clear_len % col) > 0) else 0):
+        for i in range(-1 + (clear_len // col) + (1 if ((clear_len % col) > 0) else 0)):
             sys.stdout.write("\033[A")  # 光标上移一行
             sys.stdout.write("\r\033[K")  # 清除该行
 
         # print(
         #     "len is:",
-        #     (clear_len // col) + 1 if ((clear_len % col) > 0) else 0,
+        #     (clear_len // col) + (1 if ((clear_len % col) > 0) else 0),
         #     clear_len,
         #     col,
         # )
